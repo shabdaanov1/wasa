@@ -1,6 +1,6 @@
 module github.com/shabdaanov1/wasa
 
-go 1.25.7
+go 1.25
 
 require (
 	github.com/ardanlabs/conf v1.5.0
