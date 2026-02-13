@@ -12,7 +12,9 @@ RUN go mod download
 COPY . .
 
 # Собираем приложение БЕЗ vendor
-RUN go build -mod=readonly -o /app/webapi ./cmd/webapi
+
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly -o /app/webapi ./cmd/webapi
+
 
 # Финальный образ
 FROM debian:bullseye-slim
