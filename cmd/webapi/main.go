@@ -41,10 +41,10 @@ import (
 
 	"github.com/ardanlabs/conf"
 	_ "github.com/mattn/go-sqlite3"
-	"github.com/sirupsen/logrus"
 	"github.com/shabdaanov1/wasa/service/api"
 	"github.com/shabdaanov1/wasa/service/database"
-	"github.com/shabdaanov1/wasa/service/globaltime" 
+	"github.com/shabdaanov1/wasa/service/globaltime"
+	"github.com/sirupsen/logrus"
 )
 
 // main is the program entry point. The only purpose of this function is to call run() and set the exit code if there is
