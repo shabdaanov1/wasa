@@ -57,6 +57,14 @@ type MessageWithSender struct {
 	SenderID       string         `json:"sender_id"`
 	SenderUsername string         `json:"sender_username"`
 	SenderPhoto    sql.NullString `json:"sender_photo"` // Use sql.NullString for nullable fields
+
+	// Optional text caption that accompanies a media message (photo/gif + text).
+	Caption sql.NullString `json:"caption"`
+
+	// "read" when every other participant has opened the message, otherwise
+	// "sent". Drives the single/double checkmark indicator. Only meaningful for
+	// messages sent by the requesting user.
+	ReadStatus string `json:"read_status"`
 	// The ID of the message this one is replying to (if any).
 	ReplyTo sql.NullInt64 `json:"reply_to,omitempty"`
 

@@ -36,6 +36,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"strings"
 )
 
 // AppDatabase is the high level interface for the DB
@@ -67,7 +68,9 @@ type AppDatabase interface {
 	SendMessage(conversationID int, senderID string, content string) error
 	IsUserInConversation(userID string, conversationID int) (bool, error)
 	SendMessageFull(conversationID int, senderID string, content string) error
-	GetMessagesByConversationId(conversationID int) ([]MessageWithSender, error)
+	GetMessagesByConversationId(conversationID int, currentUserID string) ([]MessageWithSender, error)
+	MarkConversationRead(conversationID int, userID string) error
+	SendMessageWithMediaCaption(conversationID int, senderID string, contentType string, content string, caption string, replyTo *int) error
 	IsMessageOwner(userID string, messageID int) (bool, error)
 	DeleteMessage(messageID int) error
 	GetMessageContent(messageID int) (string, error)
@@ -111,6 +114,13 @@ func New(db *sql.DB) (AppDatabase, error) {
 		if err != nil {
 			return nil, fmt.Errorf("error creating database structure: %w", err)
 		}
+	}
+
+	// Run idempotent migrations for features added after the initial schema
+	// (read receipts and media captions). These run on every startup so that
+	// pre-existing databases get upgraded as well.
+	if err := migrateDatabase(db); err != nil {
+		return nil, fmt.Errorf("error migrating database structure: %w", err)
 	}
 
 	return &appdbimpl{
@@ -179,6 +189,32 @@ func createDatabase(db *sql.DB) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+// migrateDatabase applies idempotent schema upgrades needed by newer features.
+func migrateDatabase(db *sql.DB) error {
+	// Per-user read tracking: one row per (message, reader). Used to compute
+	// the single/double checkmark indicators for one-on-one and group chats.
+	_, err := db.Exec(`CREATE TABLE IF NOT EXISTS message_reads (
+		message_id INTEGER NOT NULL,
+		user_id VARCHAR(64) NOT NULL,
+		read_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+		PRIMARY KEY (message_id, user_id),
+		FOREIGN KEY (message_id) REFERENCES messages(id),
+		FOREIGN KEY (user_id) REFERENCES users(id)
+	);`)
+	if err != nil {
+		return err
+	}
+
+	// Optional text caption that accompanies a media (photo/gif) message so a
+	// single message can carry both an image and text.
+	_, err = db.Exec(`ALTER TABLE messages ADD COLUMN caption TEXT DEFAULT '';`)
+	if err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+		return err
 	}
 
 	return nil

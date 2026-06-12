@@ -235,11 +235,15 @@ func (rt *_router) sendMessage(w http.ResponseWriter, r *http.Request, ps httpro
 	}
 
 	// Check if a file is uploaded (photo, GIF, etc.) or if it's just text
-	var content, contentType string
+	var content, contentType, caption string
 	file, header, fileErr := r.FormFile("file")
 
 	if fileErr == nil { // A file is uploaded
 		defer file.Close()
+
+		// A media message may also carry a text caption (requirement 5: a single
+		// message containing both text and an uploaded image).
+		caption = r.FormValue("content")
 
 		// Validate file extension
 		fileExt := strings.ToLower(filepath.Ext(header.Filename))
@@ -309,9 +313,10 @@ func (rt *_router) sendMessage(w http.ResponseWriter, r *http.Request, ps httpro
 	}
 
 	// ---------------------------------------------------------------------
-	// Save message to database, passing the optional replyTo reference
+	// Save message to database, passing the optional replyTo reference and
+	// (for media messages) the optional text caption.
 	// ---------------------------------------------------------------------
-	err = rt.db.SendMessageWithType(conversationID, senderID, content, contentType, replyTo)
+	err = rt.db.SendMessageWithMediaCaption(conversationID, senderID, contentType, content, caption, replyTo)
 	if err != nil {
 		context.Logger.WithError(err).Error("Error saving message")
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -324,6 +329,7 @@ func (rt *_router) sendMessage(w http.ResponseWriter, r *http.Request, ps httpro
 		"message":         "Message sent successfully",
 		"content_type":    contentType,
 		"content":         content,
+		"caption":         caption,
 		"sender_username": user.Username,
 		"sender_photo":    user.Photo.String, // could be empty if no photo
 	})
@@ -358,8 +364,17 @@ func (rt *_router) getConversation(w http.ResponseWriter, r *http.Request, ps ht
 		return
 	}
 
+	// Mark every message from other participants as read by the requesting
+	// user. Opening the chat view is what flips the sender's indicator to the
+	// double checkmark (and, for groups, contributes to the "all read" check).
+	if context.UserID != "" {
+		if err := rt.db.MarkConversationRead(conversationID, context.UserID); err != nil {
+			context.Logger.WithError(err).Error("Failed to mark conversation as read")
+		}
+	}
+
 	// Fetch all messages in the conversation
-	messages, err := rt.db.GetMessagesByConversationId(conversationID)
+	messages, err := rt.db.GetMessagesByConversationId(conversationID, context.UserID)
 	if err != nil {
 		context.Logger.WithError(err).Error("Failed to fetch messages")
 		w.WriteHeader(http.StatusInternalServerError)

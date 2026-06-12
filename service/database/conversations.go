@@ -222,28 +222,53 @@ func (db *appdbimpl) SendMessageFull(conversationID int, senderID string, conten
 	return err
 }
 
-// GetMessagesByConversationId: now does a LEFT JOIN on the "parent" message
-func (db *appdbimpl) GetMessagesByConversationId(conversationID int) ([]MessageWithSender, error) {
+// GetMessagesByConversationId: now does a LEFT JOIN on the "parent" message and
+// computes a per-message read_status. A message is considered "read" only when
+// every other participant in the conversation has opened it (recorded a row in
+// message_reads). For one-on-one chats this is the single other user; for
+// groups it requires all members except the sender.
+func (db *appdbimpl) GetMessagesByConversationId(conversationID int, currentUserID string) ([]MessageWithSender, error) {
 	query := `
-	SELECT 
+	SELECT
 	  m.id,
 	  m.datetime,
 	  m.content,
+	  m.caption,
 	  m.status,
 	  u.id         AS sender_id,
 	  u.name       AS sender_username,
 	  u.photo      AS sender_photo,
-	
+
 	  m.reply_to,
 	  pm.content   AS reply_to_content,
-	  pu.name      AS reply_to_sender_username
-	
+	  pu.name      AS reply_to_sender_username,
+
+	  CASE
+	    WHEN (
+	      SELECT COUNT(DISTINCT mr.user_id)
+	      FROM message_reads mr
+	      JOIN convmembers cm ON cm.user_id = mr.user_id AND cm.conversation_id = m.conversation_id
+	      WHERE mr.message_id = m.id AND mr.user_id != m.sender
+	    ) >= (
+	      SELECT COUNT(*)
+	      FROM convmembers cm2
+	      WHERE cm2.conversation_id = m.conversation_id AND cm2.user_id != m.sender
+	    )
+	    AND (
+	      SELECT COUNT(*)
+	      FROM convmembers cm3
+	      WHERE cm3.conversation_id = m.conversation_id AND cm3.user_id != m.sender
+	    ) > 0
+	    THEN 'read'
+	    ELSE 'sent'
+	  END AS read_status
+
 	FROM messages m
 	JOIN users u ON m.sender = u.id
-	
+
 	LEFT JOIN messages pm ON m.reply_to = pm.id
 	LEFT JOIN users pu    ON pm.sender = pu.id
-	
+
 	WHERE m.conversation_id = ?
 	ORDER BY m.datetime ASC;
     `
@@ -263,6 +288,7 @@ func (db *appdbimpl) GetMessagesByConversationId(conversationID int) ([]MessageW
 			&msg.ID,
 			&msg.Datetime,
 			&msg.Content,
+			&msg.Caption,
 			&msg.Status,
 			&msg.SenderID,
 			&msg.SenderUsername,
@@ -272,6 +298,8 @@ func (db *appdbimpl) GetMessagesByConversationId(conversationID int) ([]MessageW
 			&msg.ReplyTo,
 			&msg.ReplyToContent,
 			&msg.ReplyToSenderUsername,
+
+			&msg.ReadStatus,
 		)
 		if err != nil {
 			return nil, err
@@ -284,6 +312,35 @@ func (db *appdbimpl) GetMessagesByConversationId(conversationID int) ([]MessageW
 	}
 
 	return messages, nil
+}
+
+// MarkConversationRead records that the given user has read every message in the
+// conversation that was sent by someone else. Idempotent thanks to the
+// (message_id, user_id) primary key.
+func (db *appdbimpl) MarkConversationRead(conversationID int, userID string) error {
+	query := `
+		INSERT OR IGNORE INTO message_reads (message_id, user_id)
+		SELECT m.id, ?
+		FROM messages m
+		WHERE m.conversation_id = ? AND m.sender != ?;
+	`
+	_, err := db.c.Exec(query, userID, conversationID, userID)
+	return err
+}
+
+// SendMessageWithMediaCaption stores a message that may carry media content plus
+// an optional text caption, and an optional reply reference.
+func (db *appdbimpl) SendMessageWithMediaCaption(conversationID int, senderID string, contentType string, content string, caption string, replyTo *int) error {
+	query := `
+		INSERT INTO messages (conversation_id, sender, content, content_type, caption, datetime, status, reply_to)
+		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, 'sent', ?);
+	`
+	var replyToParam interface{}
+	if replyTo != nil {
+		replyToParam = *replyTo
+	}
+	_, err := db.c.Exec(query, conversationID, senderID, content, contentType, caption, replyToParam)
+	return err
 }
 
 func (db *appdbimpl) IsMessageOwner(userID string, messageID int) (bool, error) {

@@ -104,6 +104,7 @@ export default {
             photoURL = chat.photo.String.startsWith(baseURL)
               ? chat.photo.String
               : `${baseURL}${chat.photo.String}`;
+            photoURL += `?v=${Date.parse(chat.last_convo) || Date.now()}`;
           }
 
           return {

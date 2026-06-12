@@ -121,8 +121,8 @@ export default {
         this.errorMessage = "";
         this.successMessage = "";
         
-        await axios.put("/users/me/username", 
-          { username: this.newUsername.trim() },
+        await axios.put("/users/me/username",
+          { newname: this.newUsername.trim() },
           { headers: { Authorization: `Bearer ${token}` } }
         );
         

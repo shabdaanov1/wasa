@@ -112,26 +112,10 @@
                 >
                 <span class="message-time">{{ formatDate(message.datetime) }}</span>
 
-                <span
-                  v-if="message.sender_id === currentUser"
-                  class="message-status"
-                >
-                  <span
-                    v-if="!message.read_status || message.read_status === 'sent'"
-                    class="status-sent"
-                    >✓</span
-                  >
-                  <span
-                    v-else-if="message.read_status === 'delivered'"
-                    class="status-delivered"
-                    >✓✓</span
-                  >
-                  <span
-                    v-else-if="message.read_status === 'read'"
-                    class="status-read"
-                    >✓✓</span
-                  >
-                </span>
+                <span v-if="isMine(message)" class="message-status">
+                <span v-if="message.read_status === 'read'" class="status-read">✓✓</span>
+                <span v-else class="status-sent">✓</span>
+              </span>
               </div>
 
               <div class="message-actions">
@@ -145,7 +129,7 @@
                   {{ message.showComments ? "Hide" : "Comment" }}
                 </button>
                 <button
-                  v-if="message.sender_id === currentUser"
+                  v-if="isMine(message)"
                   @click="deleteMessage(message.id)"
                   class="delete-button"
                 >
@@ -159,22 +143,31 @@
                 <em>"{{ replySnippet(message.reply_to_content) }}"</em>
               </div>
 
-              <div v-if="isImage(message.content)">
-                <img
-                  :src="getImageUrl(message.content)"
-                  alt="Image Message"
-                  class="message-media"
-                />
-              </div>
-              <div v-else-if="isGif(message.content)">
-                <img
-                  :src="getImageUrl(message.content)"
-                  alt="Gif Message"
-                  class="message-media"
-                />
-              </div>
-              <div v-else>
-                <p class="message-text">{{ message.content }}</p>
+              <img
+              v-if="isImage(message.content) || isGif(message.content)"
+              :src="getImageUrl(message.content)"
+              alt="Media"
+              class="message-media"
+              />
+              <!-- Caption for a media message (image + text in one message) -->
+              <p
+              v-if="(isImage(message.content) || isGif(message.content)) && getPlainValue(message.caption)"
+              class="message-text"
+              >{{ getPlainValue(message.caption) }}</p>
+              <p
+              v-if="message.content && !isImage(message.content) && !isGif(message.content)"
+              class="message-text"
+              >{{ message.content }}</p>
+
+              <div v-if="message.comments && message.comments.length" class="reactions-row">
+              <span
+              v-for="c in message.comments"
+              :key="c.id"
+              class="reaction-chip"
+              :class="{ mine: String(c.user_id) === String(currentUser) }"
+              :title="c.username"
+              @click="String(c.user_id) === String(currentUser) ? deleteComment(message, c) : null"
+              >{{ c.content }} <small>{{ c.username }}</small></span>
               </div>
 
               <div v-if="message.showForwardPanel" class="forward-panel">
@@ -348,6 +341,9 @@ export default {
   },
 
   methods: {
+    isMine(message) {
+      return String(message.sender_id) === String(this.currentUser);
+    },
     // ====== UI helpers ======
     toggleBottomActions() {
       this.showBottomActions = !this.showBottomActions;
@@ -486,7 +482,7 @@ export default {
               reply_to: existingMsg.reply_to,
               reply_to_content: existingMsg.reply_to_content,
               reply_to_sender: existingMsg.reply_to_sender,
-              comments: existingMsg.comments,
+              
             };
           }
           // новое сообщение - инициализируем
@@ -501,6 +497,17 @@ export default {
         });
 
         this.messages = mergedMessages;
+
+        await Promise.all(
+        this.messages.map(async (m) => {
+        try {
+        const r = await axios.get(`/messages/${m.id}/comments`, {
+        headers: { Authorization: `Bearer ${token}` },
+        });
+        m.comments = r.data || [];
+        } catch { /* ignore */ }
+    })
+);
 
         const conv = response.data.conversation;
         this.isGroup = !!conv.is_group;
@@ -574,6 +581,8 @@ export default {
         const newMessage = {
           id: response.data.message_id || Date.now(),
           content: response.data.content,
+          caption: response.data.caption || "",
+          read_status: "sent",
           sender_username: response.data.sender_username,
           sender_photo: response.data.sender_photo
             ? (response.data.sender_photo.startsWith(baseURL)
@@ -673,7 +682,22 @@ async addEmojiComment(message, emoji) {
   const conversationID = this.$route.params.c_id;
   if (!token || !conversationID) return;
 
+  const mine = (message.comments || []).find(
+    (c) => String(c.user_id) === String(this.currentUser)
+  );
+
   try {
+    if (mine) {
+      await axios.delete(
+        `/conversations/${conversationID}/messages/${message.id}/comments/${mine.id}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (mine.content === emoji) {
+        message.comments = message.comments.filter((c) => c.id !== mine.id);
+        return;
+      }
+    }
+
     await axios.post(
       `/conversations/${conversationID}/messages/${message.id}/comments`,
       { content_type: "emoji", content: emoji },
@@ -685,10 +709,10 @@ async addEmojiComment(message, emoji) {
     });
     message.comments = response.data;
   } catch (error) {
-    console.error("Error adding comment:", error);
+    console.error("Error adding reaction:", error);
   }
-}
-,
+},
+
 
     // панель что показать скрыть перессылкку
     toggleForwardPanel(message) {
@@ -901,6 +925,29 @@ async addEmojiComment(message, emoji) {
   --wa-accent: #00a884;
   --wa-accent-hover: #06cf9c;
   --wa-danger: #ea4335;
+}
+
+.reactions-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.reaction-chip {
+  background-color: var(--wa-bg-hover);
+  border-radius: 12px;
+  padding: 2px 10px;
+  font-size: 0.9rem;
+  color: var(--wa-text-secondary);
+}
+.reaction-chip.mine {
+  border: 1px solid var(--wa-accent);
+  cursor: pointer;
+}
+.reaction-chip small {
+  font-size: 0.7rem;
+  color: var(--wa-text-muted);
+  margin-left: 4px;
 }
 
 /* Transitions */

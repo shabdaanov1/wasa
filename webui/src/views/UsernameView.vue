@@ -77,12 +77,18 @@ export default {
           this.$router.push("/home"); 
         }, 1000);
       } catch (error) {
-        console.error("Error updating username:", error);
-        this.errorMessage = error.response?.data?.error || "An error occurred. Please try again.";
-      }
-    }
+  console.error("Error updating username:", error);
+  if (error.response?.status === 409) {
+    this.errorMessage = "This username is already taken";
+  } else if (error.response?.status === 400) {
+    this.errorMessage = "Invalid username format";
+  } else {
+    this.errorMessage = error.response?.data?.error || "An error occurred. Please try again.";
   }
-};
+}
+  }
+}
+}
 </script>
 
 <style scoped>
