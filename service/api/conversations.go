@@ -165,7 +165,7 @@ func (rt *_router) sendMessageFirst(w http.ResponseWriter, r *http.Request, ps h
 	}
 
 	// Send the first message
-	err = rt.db.SendMessageWithMedia(newConvo.ID, sender.ID, contentType, content)
+	err = rt.db.SendMessageWithMediaCaption(newConvo.ID, sender.ID, contentType, content, "", nil)
 	if err != nil {
 		context.Logger.WithError(err).Error("Error sending message")
 		http.Error(w, "Error sending message", http.StatusInternalServerError)

@@ -475,14 +475,11 @@ export default {
           if (existingMsg) {
             return {
               ...fetchedMsg,
+              // preserve local UI state
               showComments: existingMsg.showComments,
               showForwardPanel: existingMsg.showForwardPanel,
               forwardTarget: existingMsg.forwardTarget,
-              status: existingMsg.status,
-              reply_to: existingMsg.reply_to,
-              reply_to_content: existingMsg.reply_to_content,
-              reply_to_sender: existingMsg.reply_to_sender,
-              
+              // read_status always comes fresh from server (drives ✓✓)
             };
           }
           // новое сообщение - инициализируем
