@@ -1,38 +1,28 @@
-FROM golang:1.25.4 AS builder
+FROM golang:1.21-bullseye AS builder
 
 WORKDIR /src/
 
-# Копируем go.mod и go.sum // for hash dependencies
-COPY go.mod go.sum ./
+# gcc нужен для go-sqlite3 (требует CGO)
+RUN apt-get update && apt-get install -y gcc musl-tools && rm -rf /var/lib/apt/lists/*
 
-# Скачиваем зависимости
+COPY go.mod go.sum ./
 RUN go mod download
 
-# Копируем весь код
 COPY . .
 
-# Собираем приложение БЕЗ vendor
+# CGO_ENABLED=1 обязателен для go-sqlite3
+RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 go build -mod=readonly -o /app/webapi ./cmd/webapi
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly -o /app/webapi ./cmd/webapi
 
-
-# Финальный образ
+# Финальный образ — debian чтобы были нужные libc для CGO-бинаря
 FROM debian:bullseye-slim
 
-# Устанавливаем CA сертификаты
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
 
-# Копируем скомпилированное приложение
 COPY --from=builder /app/webapi /app/webapi
 
-# Рабочая директория
 WORKDIR /app
 
-# Открываем порт
 EXPOSE 3000
 
-# Запуск
 CMD ["/app/webapi"]
-
-
-
