@@ -2,7 +2,6 @@ FROM golang:1.25-bookworm AS builder
 
 WORKDIR /src/
 
-# gcc is required by go-sqlite3 (CGO)
 RUN apt-get update && apt-get install -y gcc && rm -rf /var/lib/apt/lists/*
 
 COPY go.mod go.sum ./
@@ -10,7 +9,6 @@ RUN go mod download
 
 COPY . .
 
-# CGO_ENABLED=1 is required for go-sqlite3
 RUN CGO_ENABLED=1 GOOS=linux go build -mod=readonly -o /app/webapi ./cmd/webapi
 
 
@@ -22,6 +20,11 @@ COPY --from=builder /app/webapi /app/webapi
 
 WORKDIR /app
 
+# Создаём папку для БД и задаём абсолютный путь через env
+RUN mkdir -p /app/data
+ENV CFG_DB_FILENAME=/app/data/database.db
+
 EXPOSE 3000
 
 CMD ["/app/webapi"]
+
